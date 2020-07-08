@@ -43,4 +43,5 @@ ${GLBC} \
     --running-in-cluster=false \
     --logtostderr --v=${V} \
     --config-file-path=${GCECONF} \
+    --run-vm-controller=true \
     2>&1 | tee -a /tmp/glbc.log

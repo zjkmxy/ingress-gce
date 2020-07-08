@@ -51,6 +51,9 @@ import (
 	_ "k8s.io/ingress-gce/pkg/klog"
 	"k8s.io/ingress-gce/pkg/l4"
 	"k8s.io/ingress-gce/pkg/version"
+
+	"k8s.io/ingress-gce/pkg/experimental/migconfig"
+	migconfigclient "k8s.io/ingress-gce/pkg/experimental/migconfig/client/clientset/versioned"
 )
 
 func main() {
@@ -123,6 +126,21 @@ func main() {
 		if err != nil {
 			klog.Fatalf("Failed to create FrontendConfig client: %v", err)
 		}
+	}
+
+	// var migConfigClient migconfigclient.Interface
+	if flags.F.RunVMController {
+		migConfigCRDMeta := migconfig.CRDMeta()
+		if _, err := crdHandler.EnsureCRD(migConfigCRDMeta); err != nil {
+			klog.Fatalf("Failed to ensure MigConfig CRD: %v", err)
+		}
+
+		_, err = migconfigclient.NewForConfig(kubeConfig)
+		if err != nil {
+			klog.Fatalf("Failed to create MigConfig client: %v", err)
+		}
+
+		klog.V(4).Info("Successfully created MigConfig CRD")
 	}
 
 	namer, err := app.NewNamer(kubeClient, flags.F.ClusterName, firewalls.DefaultFirewallName)
