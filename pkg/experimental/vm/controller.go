@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
@@ -16,11 +17,13 @@ import (
 	"k8s.io/legacy-cloud-providers/gce"
 
 	corev1 "k8s.io/api/core/v1"
+	apiequality "k8s.io/apimachinery/pkg/api/equality"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	migconfigv1a1 "k8s.io/ingress-gce/pkg/apis/migconfig/v1alpha1"
 	"k8s.io/ingress-gce/pkg/utils"
 	"k8s.io/klog"
+	"k8s.io/kubernetes/pkg/api/v1/endpoints"
 )
 
 // ExControllerContext holds the state needed for the execution of the controller.
@@ -53,6 +56,7 @@ type Controller struct {
 
 	migConfigLister cache.Indexer
 	serviceLister   cache.Indexer
+	endpointsLister cache.Indexer
 	kubeClient      kubernetes.Interface
 	cloud           *gce.Cloud
 }
@@ -69,6 +73,7 @@ func NewController(
 		migConfigQueue:  workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 		migConfigLister: vmctx.MigConfigInformer.GetIndexer(),
 		serviceLister:   ctx.ServiceInformer.GetIndexer(),
+		endpointsLister: ctx.EndpointInformer.GetIndexer(),
 		kubeClient:      ctx.KubeClient,
 		cloud:           ctx.Cloud,
 	}
@@ -173,10 +178,19 @@ func (c *Controller) processMigConfig(key string) error {
 		return nil
 	}
 
+	var port int32 = 80
+	if migConfig.Spec.Port != nil {
+		port = *migConfig.Spec.Port
+	}
+
 	// Create or update Service
-	_, exists, err = c.serviceLister.GetByKey(namespace + "/" + name + "-" + migName)
+	svcName := name + "-" + migName
+	obj, exists, err = c.serviceLister.GetByKey(namespace + "/" + svcName)
+	var svc *corev1.Service
 	if !exists {
-		_, err = c.kubeClient.CoreV1().Services(namespace).Create(context.TODO(), newService(migConfig), metav1.CreateOptions{})
+		svc, err = c.kubeClient.CoreV1().Services(namespace).Create(context.TODO(), newService(migConfig), metav1.CreateOptions{})
+	} else {
+		svc = obj.(*corev1.Service)
 	}
 	if err != nil {
 		return err
@@ -194,13 +208,67 @@ func (c *Controller) processMigConfig(key string) error {
 		klog.Errorf("Cannot get instances in %s: %v", migName, err)
 		return err
 	}
+	insts := c.cloud.Compute().Instances()
+	// ips := make([]string, 0)
+	subsets := []corev1.EndpointSubset{}
 	for _, vm := range vms {
-		klog.V(0).Info("listed instance: ", vm.Instance)
+		nodeID, err := cloud.ParseResourceURL(vm.Instance)
+		if err != nil {
+			klog.Errorf("Cannot parse instance URL %s: %v", vm.Instance, err)
+			continue
+		}
+		inst, err := insts.Get(context.TODO(), nodeID.Key)
+		if err != nil {
+			klog.Errorf("Cannot get instance for %s: %v", nodeID.Key.Name, err)
+			continue
+		}
+		if len(inst.NetworkInterfaces) > 0 {
+			// append(ips, inst.NetworkInterfaces[0].NetworkIP)
+			subsets = append(subsets, corev1.EndpointSubset{
+				Addresses: []corev1.EndpointAddress{
+					{IP: inst.NetworkInterfaces[0].NetworkIP},
+				},
+				Ports: []corev1.EndpointPort{
+					{
+						Port:     port,
+						Protocol: "TCP",
+					},
+				},
+			})
+		}
 	}
-	klog.V(0).Info("Successfully queried mig", migName)
-	return nil
+	subsets = endpoints.RepackSubsets(subsets)
 
 	// Create or update Endpoints/EngpointSlices
+	obj, exists, err = c.endpointsLister.GetByKey(svc.Namespace + "/" + svc.Name)
+	var curEps *corev1.Endpoints
+	if exists {
+		curEps = obj.(*corev1.Endpoints)
+		if apiequality.Semantic.DeepEqual(curEps.Subsets, subsets) {
+			klog.V(0).Infof("No need to update for %s", svc.Name)
+			return nil
+		}
+	} else {
+		curEps = &corev1.Endpoints{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:   svc.Name,
+				Labels: svc.Labels,
+			},
+		}
+	}
+
+	newEps := curEps.DeepCopy()
+	newEps.Subsets = subsets
+	newEps.Labels = svc.Labels
+
+	if !exists {
+		_, err = c.kubeClient.CoreV1().Endpoints(svc.Namespace).Create(context.TODO(), newEps, metav1.CreateOptions{})
+	} else {
+		_, err = c.kubeClient.CoreV1().Endpoints(svc.Namespace).Update(context.TODO(), newEps, metav1.UpdateOptions{})
+	}
+	klog.V(0).Infof("Updated Endpoints for %s", svc.Name)
+
+	return err
 }
 
 func newService(migConfig *migconfigv1a1.MigConfig) *corev1.Service {
