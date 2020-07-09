@@ -26,6 +26,10 @@ import (
 	"k8s.io/kubernetes/pkg/api/v1/endpoints"
 )
 
+const (
+	pollInterval = 10 * time.Second
+)
+
 // ExControllerContext holds the state needed for the execution of the controller.
 type ExControllerContext struct {
 	MigConfigInformer cache.SharedIndexInformer
@@ -59,6 +63,7 @@ type Controller struct {
 	endpointsLister cache.Indexer
 	kubeClient      kubernetes.Interface
 	cloud           *gce.Cloud
+	firstPoll       bool
 }
 
 // NewController returns a VM controller.
@@ -76,6 +81,7 @@ func NewController(
 		endpointsLister: ctx.EndpointInformer.GetIndexer(),
 		kubeClient:      ctx.KubeClient,
 		cloud:           ctx.Cloud,
+		firstPoll:       true,
 	}
 
 	vmctx.MigConfigInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -102,6 +108,8 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	}()
 
 	go wait.Until(c.migConfigWorker, time.Second, stopCh)
+	// Resync is enabled in this controller so there is no need to schedule it manually
+	// go wait.Until(c.refreshAllMigConfigs, pollInterval, stopCh)
 	<-stopCh
 }
 
@@ -299,5 +307,19 @@ func newService(migConfig *migconfigv1a1.MigConfig) *corev1.Service {
 			},
 			Type: "ClusterIP",
 		},
+	}
+}
+
+func (c *Controller) refreshAllMigConfigs() {
+	// Ignore the first call, since informer will handle this
+	if c.firstPoll {
+		c.firstPoll = false
+		return
+	}
+
+	// Enqueue all existing MigConfig
+	keys := c.migConfigLister.ListKeys()
+	for _, key := range keys {
+		klog.V(0).Info(key)
 	}
 }
