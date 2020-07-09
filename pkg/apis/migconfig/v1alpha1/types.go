@@ -30,13 +30,14 @@ type MigConfig struct {
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	Spec   MigConfigSpec   `json:"spec"`
-	Status MigConfigStatus `json:"status"`
+	Status MigConfigStatus `json:"status,omitempty"`
 }
 
 // MigConfigSpec is the spec for a MigConfig resource
 // +k8s:openapi-gen=true
 type MigConfigSpec struct {
-	MigName string `json:"MigName"`
+	MigName string `json:"migName"`
+	Zone    string `json:"zone"`
 	Port    *int32 `json:"port,omitempty"`
 }
 

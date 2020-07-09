@@ -70,7 +70,7 @@ func schema_pkg_apis_migconfig_v1alpha1_MigConfig(ref common.ReferenceCallback) 
 						},
 					},
 				},
-				Required: []string{"spec", "status"},
+				Required: []string{"spec"},
 			},
 		},
 		Dependencies: []string{
@@ -85,7 +85,13 @@ func schema_pkg_apis_migconfig_v1alpha1_MigConfigSpec(ref common.ReferenceCallba
 				Description: "MigConfigSpec is the spec for a MigConfig resource",
 				Type:        []string{"object"},
 				Properties: map[string]spec.Schema{
-					"MigName": {
+					"migName": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"zone": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
 							Format: "",
@@ -98,7 +104,7 @@ func schema_pkg_apis_migconfig_v1alpha1_MigConfigSpec(ref common.ReferenceCallba
 						},
 					},
 				},
-				Required: []string{"MigName"},
+				Required: []string{"migName", "zone"},
 			},
 		},
 	}

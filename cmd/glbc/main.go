@@ -54,6 +54,7 @@ import (
 
 	"k8s.io/ingress-gce/pkg/experimental/migconfig"
 	migconfigclient "k8s.io/ingress-gce/pkg/experimental/migconfig/client/clientset/versioned"
+	"k8s.io/ingress-gce/pkg/experimental/vm"
 )
 
 func main() {
@@ -128,19 +129,19 @@ func main() {
 		}
 	}
 
-	// var migConfigClient migconfigclient.Interface
+	var migConfigClient migconfigclient.Interface
 	if flags.F.RunVMController {
 		migConfigCRDMeta := migconfig.CRDMeta()
 		if _, err := crdHandler.EnsureCRD(migConfigCRDMeta); err != nil {
 			klog.Fatalf("Failed to ensure MigConfig CRD: %v", err)
 		}
 
-		_, err = migconfigclient.NewForConfig(kubeConfig)
+		migConfigClient, err = migconfigclient.NewForConfig(kubeConfig)
 		if err != nil {
 			klog.Fatalf("Failed to create MigConfig client: %v", err)
 		}
 
-		klog.V(4).Info("Successfully created MigConfig CRD")
+		klog.V(0).Info("Successfully created MigConfig CRD")
 	}
 
 	namer, err := app.NewNamer(kubeClient, flags.F.ClusterName, firewalls.DefaultFirewallName)
@@ -172,6 +173,12 @@ func main() {
 	}
 	ctx := ingctx.NewControllerContext(kubeConfig, kubeClient, backendConfigClient, frontendConfigClient, cloud, namer, kubeSystemUID, ctxConfig)
 	go app.RunHTTPServer(ctx.HealthCheck)
+
+	if flags.F.RunVMController {
+		vmctx := vm.NewControllerContext(kubeClient, migConfigClient, ctxConfig)
+		runVMController(ctx, vmctx)
+		return
+	}
 
 	if !flags.F.LeaderElection.LeaderElect {
 		runControllers(ctx)
@@ -276,6 +283,26 @@ func runControllers(ctx *ingctx.ControllerContext) {
 	ctx.Start(stopCh)
 	lbc.Init()
 	lbc.Run()
+
+	for {
+		klog.Warning("Handled quit, awaiting pod deletion.")
+		time.Sleep(30 * time.Second)
+		if ctx.EnableASMConfigMap {
+			return
+		}
+	}
+}
+
+func runVMController(ctx *ingctx.ControllerContext, vmctx *vm.ExControllerContext) {
+	stopCh := make(chan struct{})
+	ctx.Init()
+
+	vmc := vm.NewController(ctx, vmctx)
+
+	ctx.Start(stopCh)
+	vmctx.Start(stopCh)
+
+	vmc.Run(stopCh)
 
 	for {
 		klog.Warning("Handled quit, awaiting pod deletion.")

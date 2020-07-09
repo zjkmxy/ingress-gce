@@ -1,0 +1,9 @@
+apiVersion: cloud.google.com/v1alpha1
+kind: MigConfig
+metadata:
+  name: clus-mig
+spec:
+  migName: gke-xinyu-cluster2-default-pool-1021d4e4-grp
+  zone: us-west2-a
+  port: 80
+
