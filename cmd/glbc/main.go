@@ -52,9 +52,13 @@ import (
 	"k8s.io/ingress-gce/pkg/l4"
 	"k8s.io/ingress-gce/pkg/version"
 
+	exctx "k8s.io/ingress-gce/pkg/experimental/context"
 	"k8s.io/ingress-gce/pkg/experimental/migconfig"
 	migconfigclient "k8s.io/ingress-gce/pkg/experimental/migconfig/client/clientset/versioned"
 	"k8s.io/ingress-gce/pkg/experimental/vm"
+	"k8s.io/ingress-gce/pkg/experimental/vminstance"
+	vminstanceclient "k8s.io/ingress-gce/pkg/experimental/vminstance/client/clientset/versioned"
+	"k8s.io/ingress-gce/pkg/experimental/vmsr"
 )
 
 func main() {
@@ -130,6 +134,7 @@ func main() {
 	}
 
 	var migConfigClient migconfigclient.Interface
+	var vmInstClient vminstanceclient.Interface
 	if flags.F.RunVMController {
 		migConfigCRDMeta := migconfig.CRDMeta()
 		if _, err := crdHandler.EnsureCRD(migConfigCRDMeta); err != nil {
@@ -142,6 +147,18 @@ func main() {
 		}
 
 		klog.V(0).Info("Successfully created MigConfig CRD")
+
+		vmInstCRDMeta := vminstance.CRDMeta()
+		if _, err := crdHandler.EnsureCRD(vmInstCRDMeta); err != nil {
+			klog.Fatalf("Failed to ensure VMInstance CRD: %v", err)
+		}
+
+		vmInstClient, err = vminstanceclient.NewForConfig(kubeConfig)
+		if err != nil {
+			klog.Fatalf("Failed to create VMInstance client: %v", err)
+		}
+
+		klog.V(0).Info("Successfully created VMInstance CRD")
 	}
 
 	namer, err := app.NewNamer(kubeClient, flags.F.ClusterName, firewalls.DefaultFirewallName)
@@ -175,7 +192,7 @@ func main() {
 	go app.RunHTTPServer(ctx.HealthCheck)
 
 	if flags.F.RunVMController {
-		vmctx := vm.NewControllerContext(kubeClient, migConfigClient, ctxConfig)
+		vmctx := exctx.NewControllerContext(kubeClient, migConfigClient, vmInstClient, ctxConfig)
 		runVMController(ctx, vmctx)
 		return
 	}
@@ -293,16 +310,18 @@ func runControllers(ctx *ingctx.ControllerContext) {
 	}
 }
 
-func runVMController(ctx *ingctx.ControllerContext, vmctx *vm.ExControllerContext) {
+func runVMController(ctx *ingctx.ControllerContext, vmctx *exctx.ExControllerContext) {
 	stopCh := make(chan struct{})
 	ctx.Init()
 
 	vmc := vm.NewController(ctx, vmctx)
+	vmsr := vmsr.NewController(ctx, vmctx)
 
 	ctx.Start(stopCh)
 	vmctx.Start(stopCh)
 
-	vmc.Run(stopCh)
+	go vmc.Run(stopCh)
+	vmsr.Run(stopCh)
 
 	for {
 		klog.Warning("Handled quit, awaiting pod deletion.")

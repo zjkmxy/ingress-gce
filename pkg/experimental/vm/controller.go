@@ -12,8 +12,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	ingctx "k8s.io/ingress-gce/pkg/context"
-	migconfigclient "k8s.io/ingress-gce/pkg/experimental/migconfig/client/clientset/versioned"
-	informermigconfig "k8s.io/ingress-gce/pkg/experimental/migconfig/client/informers/externalversions/migconfig/v1alpha1"
+	exctx "k8s.io/ingress-gce/pkg/experimental/context"
 	"k8s.io/legacy-cloud-providers/gce"
 
 	corev1 "k8s.io/api/core/v1"
@@ -21,7 +20,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	migconfigv1a1 "k8s.io/ingress-gce/pkg/apis/migconfig/v1alpha1"
-	"k8s.io/ingress-gce/pkg/utils"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/api/v1/endpoints"
 )
@@ -29,27 +27,6 @@ import (
 const (
 	pollInterval = 10 * time.Second
 )
-
-// ExControllerContext holds the state needed for the execution of the controller.
-type ExControllerContext struct {
-	MigConfigInformer cache.SharedIndexInformer
-}
-
-// NewControllerContext returns a set of informers
-func NewControllerContext(
-	kubeClient kubernetes.Interface,
-	migConfigClient migconfigclient.Interface,
-	config ingctx.ControllerContextConfig) *ExControllerContext {
-	context := &ExControllerContext{
-		MigConfigInformer: informermigconfig.NewMigConfigInformer(migConfigClient, config.Namespace, config.ResyncPeriod, utils.NewNamespaceIndexer()),
-	}
-	return context
-}
-
-// Start all of the informers.
-func (vmctx *ExControllerContext) Start(stopCh chan struct{}) {
-	go vmctx.MigConfigInformer.Run(stopCh)
-}
 
 // Controller is VM controller
 type Controller struct {
@@ -69,11 +46,11 @@ type Controller struct {
 // NewController returns a VM controller.
 func NewController(
 	ctx *ingctx.ControllerContext,
-	vmctx *ExControllerContext,
+	vmctx *exctx.ExControllerContext,
 ) *Controller {
 	vmController := &Controller{
 		hasSynced: func() bool {
-			return ctx.HasSynced() && vmctx.MigConfigInformer.HasSynced()
+			return ctx.HasSynced() && vmctx.HasSynced()
 		},
 		migConfigQueue:  workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 		migConfigLister: vmctx.MigConfigInformer.GetIndexer(),
@@ -103,7 +80,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 
 	klog.V(2).Infof("Starting VM controller")
 	defer func() {
-		klog.V(2).Infof("Shutting down network endpoint group controller")
+		klog.V(2).Infof("Shutting down VM controller")
 		c.stop()
 	}()
 
@@ -114,7 +91,7 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 }
 
 func (c *Controller) stop() {
-	klog.V(2).Infof("Shutting down network endpoint group controller")
+	klog.V(2).Infof("Shutting down VM controller")
 	c.migConfigQueue.ShutDown()
 }
 
@@ -305,7 +282,9 @@ func newService(migConfig *migconfigv1a1.MigConfig) *corev1.Service {
 					TargetPort: intstr.IntOrString{IntVal: port},
 				},
 			},
-			Type: "ClusterIP",
+			// Type: "ClusterIP",
+			Type: "LoadBalancer",
+			// ClusterIP: "None",
 		},
 	}
 }
