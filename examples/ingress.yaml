@@ -10,4 +10,8 @@ spec:
         backend:
           serviceName: hostname-mig-xinyu-mig2
           servicePort: 9376
+      - path: /vm
+        backend:
+          serviceName: vm-svc
+          servicePort: 80
 

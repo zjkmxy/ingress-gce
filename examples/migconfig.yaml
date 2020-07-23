@@ -1,0 +1,9 @@
+apiVersion: cloud.google.com/v1alpha1
+kind: MigConfig
+metadata:
+  name: hostname-mig
+spec:
+  migName: xinyu-mig2
+  zone: us-west2-a
+  port: 9376
+

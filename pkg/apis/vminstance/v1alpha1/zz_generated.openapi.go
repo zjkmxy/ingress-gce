@@ -29,8 +29,40 @@ import (
 
 func GetOpenAPIDefinitions(ref common.ReferenceCallback) map[string]common.OpenAPIDefinition {
 	return map[string]common.OpenAPIDefinition{
+		"k8s.io/ingress-gce/pkg/apis/vminstance/v1alpha1.VMCondition":    schema_pkg_apis_vminstance_v1alpha1_VMCondition(ref),
 		"k8s.io/ingress-gce/pkg/apis/vminstance/v1alpha1.VMInstance":     schema_pkg_apis_vminstance_v1alpha1_VMInstance(ref),
 		"k8s.io/ingress-gce/pkg/apis/vminstance/v1alpha1.VMInstanceSpec": schema_pkg_apis_vminstance_v1alpha1_VMInstanceSpec(ref),
+	}
+}
+
+func schema_pkg_apis_vminstance_v1alpha1_VMCondition(ref common.ReferenceCallback) common.OpenAPIDefinition {
+	return common.OpenAPIDefinition{
+		Schema: spec.Schema{
+			SchemaProps: spec.SchemaProps{
+				Type: []string{"object"},
+				Properties: map[string]spec.Schema{
+					"type": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"status": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"lastTransitionTime": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+				},
+				Required: []string{"type", "status", "lastTransitionTime"},
+			},
+		},
 	}
 }
 
@@ -92,6 +124,18 @@ func schema_pkg_apis_vminstance_v1alpha1_VMInstanceSpec(ref common.ReferenceCall
 						},
 					},
 					"ip": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"heartBeat": {
+						SchemaProps: spec.SchemaProps{
+							Type:   []string{"string"},
+							Format: "",
+						},
+					},
+					"ping": {
 						SchemaProps: spec.SchemaProps{
 							Type:   []string{"string"},
 							Format: "",

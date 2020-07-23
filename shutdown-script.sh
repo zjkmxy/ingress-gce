@@ -1,2 +1,2 @@
 #! /bin/bash
-sudo /usr/local/bin/kubectl delete vm `/bin/hostname`
+sudo /root/run_vm.sh shutdown

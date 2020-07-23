@@ -36,12 +36,15 @@ type VMInstance struct {
 // VMInstanceSpec is the spec for a VMInstance resource
 // +k8s:openapi-gen=true
 type VMInstanceSpec struct {
-	HostName string `json:"hostName"`
-	IP       string `json:"ip"`
+	HostName  string `json:"hostName"`
+	IP        string `json:"ip"`
+	HeartBeat string `json:"heartBeat,omitempty"`
+	Ping      string `json:"ping,omitempty"`
 }
 
 // VMInstanceStatus is the status for a VMInstance resource
 type VMInstanceStatus struct {
+	Conditions []VMCondition `json:"conditions,omitempty"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
@@ -52,4 +55,16 @@ type VMInstanceList struct {
 	metav1.ListMeta `json:"metadata"`
 
 	Items []VMInstance `json:"items"`
+}
+
+const (
+	HeartBeat string = "HeartBeat"
+	Ping      string = "Ping"
+)
+
+// +k8s:openapi-gen=true
+type VMCondition struct {
+	Type               string `json:"type"`
+	Status             string `json:"status"`
+	LastTransitionTime string `json:"lastTransitionTime"`
 }
