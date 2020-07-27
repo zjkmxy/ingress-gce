@@ -1,0 +1,25 @@
+k8s-cluster-name: <cluster-name>
+k8s-cluster-zone: <cluster-zone>
+k8s-label-tier: vm
+startup-script: |
+    #! /bin/bash
+    sudo gsutil cp gs://<bucker-name>/run_vm.sh /root/run_vm.sh
+    sudo chmod a+x /root/run_vm.sh
+    sudo /root/run_vm.sh startup
+    
+    sudo crontab -l > ./cron.txt
+    echo "*/1 * * * * sudo /root/run_vm.sh update" >> ./cron.txt
+    crontab ./cron.txt
+    rm ./cron.txt
+    
+    sudo apt-get update -y
+    sudo apt-get install apache2 -y
+    sudo service apache2 restart
+    sudo mkdir -p /var/www/html/
+    sudo mkdir -p /var/www/html/vm/
+    sudo /bin/hostname | sudo tee /var/www/html/index.html
+    sudo /bin/hostname | sudo tee /var/www/html/vm/index.html
+shutdown-script: |
+    #! /bin/bash
+    sudo /root/run_vm.sh shutdown
+
