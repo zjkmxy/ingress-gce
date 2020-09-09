@@ -48,6 +48,8 @@ type WorkloadSpec struct {
 	// Addresses specifies the addresses that can be used to access the workload from the cluster.
 	// +listType=atomic
 	Addresses []ExternalWorkloadAddress `json:"addresses"`
+	// PingPort is the port number used to ping this workload
+	PingPort *int32 `json:"pingPort,omitempty"`
 }
 
 // ExternalWorkloadAddress represents an address used by an ExternalWorkload
@@ -74,7 +76,9 @@ type WorkloadStatus struct {
 	// +optional
 	// +listType=map
 	// +listMapKey=type
-	Conditions []Condition `json:"conditions"`
+	// +patchMergeKey=type
+	// +patchStrategy=merge
+	Conditions []Condition `json:"conditions" patchStrategy:"merge" patchMergeKey:"type"`
 }
 
 // The following constants define the types of conditions of an external workload

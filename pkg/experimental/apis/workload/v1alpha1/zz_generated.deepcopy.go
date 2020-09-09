@@ -131,6 +131,11 @@ func (in *WorkloadSpec) DeepCopyInto(out *WorkloadSpec) {
 		*out = make([]ExternalWorkloadAddress, len(*in))
 		copy(*out, *in)
 	}
+	if in.PingPort != nil {
+		in, out := &in.PingPort, &out.PingPort
+		*out = new(int32)
+		**out = **in
+	}
 	return
 }
 

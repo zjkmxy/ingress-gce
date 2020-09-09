@@ -25,52 +25,6 @@ import (
 	"k8s.io/klog"
 )
 
-const kubeConfigUserTemp = `
-apiVersion: v1
-clusters:
-- cluster:
-    certificate-authority-data: {{.clusterCa}}
-    server: https://{{.clusterIP}}
-  name: {{.clusterName}}
-contexts:
-- context:
-    cluster: {{.clusterName}}
-    user: {{.clusterName}}
-  name: {{.clusterName}}
-current-context: {{.clusterName}}
-kind: Config
-preferences: {}
-users:
-- name: {{.clusterName}}
-  user:
-    auth-provider:
-      config:
-        cmd-args: get-credentials
-        cmd-path: {{.path}}
-        expiry-key: '{.token_expiry}'
-        token-key: '{.access_token}'
-      name: {{.authProvider}}`
-
-const kubeConfigKsaTemp = `
-apiVersion: v1
-clusters:
-- cluster:
-    certificate-authority-data: {{.clusterCa}}
-    server: https://{{.clusterIP}}
-  name: {{.clusterName}}
-contexts:
-- context:
-    cluster: {{.clusterName}}
-    user: {{.saName}}
-  name: {{.clusterName}}
-current-context: {{.clusterName}}
-kind: Config
-preferences: {}
-users:
-- name: {{.saName}}
-  user:
-    token: {{.accessToken}}`
-
 // GenKubeConfigForKSA generates a KubeConfig to access the cluster using a Kubernetes service account
 func GenKubeConfigForKSA(clusterCa, clusterIP, clusterName, saName, accessToken string) []byte {
 	var kubeConfig bytes.Buffer

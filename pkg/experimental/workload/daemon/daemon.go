@@ -31,7 +31,7 @@ import (
 	workloadv1a1 "k8s.io/ingress-gce/pkg/experimental/apis/workload/v1alpha1"
 	workloadclient "k8s.io/ingress-gce/pkg/experimental/workload/client/clientset/versioned"
 	daemonutils "k8s.io/ingress-gce/pkg/experimental/workload/daemon/utils"
-	"k8s.io/ingress-gce/pkg/utils"
+	workloadutils "k8s.io/ingress-gce/pkg/experimental/workload/utils"
 	"k8s.io/klog"
 )
 
@@ -96,7 +96,7 @@ func updateCR(
 		select {
 		case <-ticker.C:
 			newStatus := generateHeartbeatStatus()
-			patch, err := preparePatchBytesforWorkloadStatus(oldStatus, newStatus)
+			patch, err := workloadutils.PreparePatchBytesforWorkloadStatus(oldStatus, newStatus)
 			if err != nil {
 				klog.Errorf("failed to prepare the patch for workload resource: %+v", err)
 				continue
@@ -104,6 +104,9 @@ func updateCR(
 			oldStatus = newStatus
 
 			vmInstClient := clientset.NetworkingV1alpha1().Workloads(corev1.NamespaceDefault)
+			// WARNING: StrategicMergePatch does not work for CRD
+			// SA: https://github.com/kubernetes/kubernetes/issues/58017
+			// SA: https://github.com/kubernetes/kubernetes/pull/63146
 			_, err = vmInstClient.Patch(context.Background(), workload.Name, types.MergePatchType,
 				patch, metav1.PatchOptions{})
 			if err != nil {
@@ -128,6 +131,7 @@ func getWorkloadCR(workload daemonutils.WorkloadInfo) *workloadv1a1.Workload {
 		Spec: workloadv1a1.WorkloadSpec{
 			EnableHeartbeat: true,
 			EnablePing:      true,
+			PingPort:        refint32(80), // TODO: Change this to argument
 		},
 		Status: generateHeartbeatStatus(),
 	}
@@ -168,16 +172,6 @@ func OutputCredentials(credentials daemonutils.ClusterCredentials) {
 	fmt.Println(string(ret))
 }
 
-// preparePatchBytesforWorkloadStatus generates patch bytes based on the old and new workload status
-func preparePatchBytesforWorkloadStatus(oldStatus, newStatus workloadv1a1.WorkloadStatus) ([]byte, error) {
-	patchBytes, err := utils.StrategicMergePatchBytes(
-		workloadv1a1.Workload{Status: oldStatus},
-		workloadv1a1.Workload{Status: newStatus},
-		workloadv1a1.Workload{},
-	)
-	return patchBytes, err
-}
-
 func generateHeartbeatStatus() workloadv1a1.WorkloadStatus {
 	return workloadv1a1.WorkloadStatus{
 		Conditions: []workloadv1a1.Condition{
@@ -189,4 +183,8 @@ func generateHeartbeatStatus() workloadv1a1.WorkloadStatus {
 			},
 		},
 	}
+}
+
+func refint32(x int32) *int32 {
+	return &x
 }

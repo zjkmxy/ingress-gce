@@ -19,6 +19,7 @@ package workload
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	informerv1 "k8s.io/client-go/informers/core/v1"
@@ -37,11 +39,15 @@ import (
 	workloadv1a1 "k8s.io/ingress-gce/pkg/experimental/apis/workload/v1alpha1"
 	workloadclient "k8s.io/ingress-gce/pkg/experimental/workload/client/clientset/versioned"
 	informerworkload "k8s.io/ingress-gce/pkg/experimental/workload/client/informers/externalversions/workload/v1alpha1"
+	workloadutils "k8s.io/ingress-gce/pkg/experimental/workload/utils"
 	"k8s.io/ingress-gce/pkg/utils"
 	"k8s.io/klog"
 )
 
-const controllerName = "workload-controller.k8s.io"
+const (
+	controllerName = "workload-controller.k8s.io"
+	pingTimeout    = 4000 * time.Millisecond
+)
 
 // ControllerContext holds the state needed for the execution of the workload controller.
 type ControllerContext struct {
@@ -73,6 +79,7 @@ func NewControllerContext(
 type Controller struct {
 	hasSynced           func() bool
 	queue               workqueue.RateLimitingInterface
+	pingQueue           workqueue.RateLimitingInterface
 	workloadLister      cache.Indexer
 	serviceLister       cache.Indexer
 	endpointSliceLister cache.Indexer
@@ -97,6 +104,7 @@ func NewController(ctx *ControllerContext) *Controller {
 	c := &Controller{
 		hasSynced:           ctx.HasSynced,
 		queue:               workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
+		pingQueue:           workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter()),
 		workloadLister:      ctx.WorkloadInformer.GetIndexer(),
 		serviceLister:       ctx.ServiceInformer.GetIndexer(),
 		endpointSliceLister: ctx.EndpointSliceInformer.GetIndexer(),
@@ -135,13 +143,19 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 		c.stop()
 	}()
 
+	// TODO: Add replicas
 	go wait.Until(c.serviceWorker, time.Second, stopCh)
+	go wait.Until(c.pingWorker, time.Second, stopCh)
+
+	// Periodically ping
+	go wait.Until(c.triggerPeriodicPing, 10*time.Second, stopCh)
 	<-stopCh
 }
 
 func (c *Controller) stop() {
 	klog.V(2).Infof("Shutting down workload controller")
 	c.queue.ShutDown()
+	c.pingQueue.ShutDown()
 }
 
 func (c *Controller) serviceWorker() {
@@ -165,7 +179,7 @@ func (c *Controller) handleErr(err error, key interface{}) {
 	}
 
 	klog.Errorf("error processing Service %q: %v", key, err)
-	if _, exists, err := c.workloadLister.GetByKey(key.(string)); err != nil {
+	if _, exists, err := c.serviceLister.GetByKey(key.(string)); err != nil {
 		klog.Warningf("failed to retrieve Service %q from store: %v", key.(string), err)
 	} else if exists {
 		klog.Warningf("process Service %q failed: %v", key.(string), err)
@@ -415,4 +429,118 @@ func listMachedWorkload(
 func endpointsliceName(svcName string) string {
 	// WARNING: Change this name scheme may break endpointslices created by old versions
 	return svcName + "-" + controllerName
+}
+
+func (c *Controller) handlePingErr(err error, key interface{}) {
+	if err == nil {
+		c.pingQueue.Forget(key)
+		return
+	}
+
+	klog.Errorf("error processing Workload %q: %v", key, err)
+	if _, _, err := c.workloadLister.GetByKey(key.(string)); err != nil {
+		klog.Warningf("failed to retrieve Workload %q from store: %v", key.(string), err)
+	}
+	c.pingQueue.AddRateLimited(key)
+}
+
+func (c *Controller) pingWorker() {
+	for {
+		func() {
+			key, quit := c.pingQueue.Get()
+			if quit {
+				return
+			}
+			defer c.queue.Done(key)
+			err := c.processPing(key.(string))
+			c.handlePingErr(err, key)
+		}()
+	}
+}
+
+func (c *Controller) processPing(key string) error {
+	namespace, name, err := cache.SplitMetaNamespaceKey(key)
+	if err != nil {
+		return err
+	}
+	obj, exists, err := c.workloadLister.GetByKey(key)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
+	wl := obj.(*workloadv1a1.Workload)
+	if len(wl.Spec.Addresses) == 0 || wl.Spec.PingPort == nil || !wl.Spec.EnablePing {
+		return nil
+	}
+
+	// People suggest using DialTimeout to a known port instead of doing ICMP ping, because
+	//  1. firewalls may block ping.
+	//  2. ping needs to create raw IP packets, which is a privileged action.
+	// TODO: For simplicity here only pings the first address. To be improved in future.
+	pingAddr := fmt.Sprintf("%s:%d", wl.Spec.Addresses[0].Address, *wl.Spec.PingPort)
+	conn, err := net.DialTimeout("tcp", pingAddr, pingTimeout)
+	var pingStatus workloadv1a1.ConditionStatus
+	if err == nil {
+		pingStatus = workloadv1a1.ConditionStatusTrue
+		klog.V(4).Infof("Successfully pinged Workload %s", name)
+	} else {
+		pingStatus = workloadv1a1.ConditionStatusFalse
+		klog.V(4).Infof("Failed to ping Workload %s", name)
+	}
+	if conn != nil {
+		conn.Close()
+	}
+
+	condIdx := -1
+	for i, cond := range wl.Status.Conditions {
+		if cond.Type == workloadv1a1.WorkloadConditionPing {
+			condIdx = i
+			break
+		}
+	}
+	newStatus := wl.Status.DeepCopy()
+	if condIdx == -1 {
+		condIdx = len(wl.Status.Conditions)
+		newStatus.Conditions = append(wl.Status.Conditions, workloadv1a1.Condition{
+			Type:   workloadv1a1.WorkloadConditionPing,
+			Status: workloadv1a1.ConditionStatusUnknown,
+			Reason: "Ping",
+		})
+	}
+
+	if newStatus.Conditions[condIdx].Status == pingStatus {
+		return nil
+	}
+	newStatus.Conditions[condIdx].LastTransitionTime = metav1.Now()
+	newStatus.Conditions[condIdx].Status = pingStatus
+	patch, err := workloadutils.PreparePatchBytesforWorkloadStatus(wl.Status, *newStatus)
+	if err != nil {
+		klog.Errorf("Unable to generate patch for Workload %s: %+v", name, err)
+		return err
+	}
+	client := c.ctx.WorkloadClient.NetworkingV1alpha1().Workloads(namespace)
+	_, err = client.Patch(context.Background(), name, types.MergePatchType,
+		patch, metav1.PatchOptions{})
+	if err != nil {
+		klog.Errorf("Unable to patch Workload %s: %+v", name, err)
+		return err
+	}
+	klog.V(4).Infof("Updated the ping status of Workload %s", name)
+
+	return nil
+}
+
+func (c *Controller) triggerPeriodicPing() {
+	wls := c.workloadLister.List()
+	for _, obj := range wls {
+		key, err := cache.MetaNamespaceKeyFunc(obj)
+		if err != nil {
+			utilruntime.HandleError(fmt.Errorf("Couldn't get key for object %+v: %v", obj, err))
+			return
+		}
+		c.pingQueue.Add(key)
+	}
 }

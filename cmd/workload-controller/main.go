@@ -85,7 +85,7 @@ func main() {
 	}
 
 	ctx := workload.NewControllerContext(kubeClient, workloadClient, flags.F.WatchNamespace, flags.F.ResyncPeriod)
-	// TODO: Leader Elect and Health Check?
+	// TODO: Leader election and liveness probe
 
 	runController(ctx)
 }

@@ -210,6 +210,13 @@ func schema_experimental_apis_workload_v1alpha1_WorkloadSpec(ref common.Referenc
 							},
 						},
 					},
+					"pingPort": {
+						SchemaProps: spec.SchemaProps{
+							Description: "PingPort is the port number used to ping this workload",
+							Type:        []string{"integer"},
+							Format:      "int32",
+						},
+					},
 				},
 				Required: []string{"enableHeartbeat", "enablePing", "addresses"},
 			},
@@ -232,7 +239,9 @@ func schema_experimental_apis_workload_v1alpha1_WorkloadStatus(ref common.Refere
 								"x-kubernetes-list-map-keys": []interface{}{
 									"type",
 								},
-								"x-kubernetes-list-type": "map",
+								"x-kubernetes-list-type":       "map",
+								"x-kubernetes-patch-merge-key": "type",
+								"x-kubernetes-patch-strategy":  "merge",
 							},
 						},
 						SchemaProps: spec.SchemaProps{
