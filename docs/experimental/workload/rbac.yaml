@@ -3,20 +3,6 @@ kind: ServiceAccount
 metadata:
   name: workload-controller
 ---
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: workload
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: workload
-rules:
-  - apiGroups: ["networking.gke.io"]
-    resources: ["workloads"]
-    verbs: ["get", "list", "create", "watch", "update", "patch", "delete"]
----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -38,19 +24,6 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: workload
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: workload
-subjects:
-  - kind: ServiceAccount
-    name: workload
-    namespace: default
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
   name: workload-controller
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -60,3 +33,12 @@ subjects:
   - kind: ServiceAccount
     name: workload-controller
     namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: workload
+rules:
+  - apiGroups: ["networking.gke.io"]
+    resources: ["workloads"]
+    verbs: ["get", "list", "create", "watch", "update", "patch", "delete"]
